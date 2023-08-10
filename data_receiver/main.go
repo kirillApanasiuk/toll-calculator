@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"github.com/gorilla/websocket"
 	kafkaConfig "github.com/kirillApanasiuk/toll-calculator/config"
@@ -13,33 +14,12 @@ import (
 const KafkaTopic = "obudata"
 
 func main() {
-	config := sarama.NewConfig()
-	config.Producer.Return.Successes = true
-	config.Producer.Return.Errors = true
-	producer, err := sarama.NewSyncProducer([]string{kafkaConfig.CONST_HOST}, config)
+
+	receiver, err := NewDataReceiver()
 	if err != nil {
-		log.Fatal("failed to initialize NewSyncProducer, err:", err)
-		return
-	}
-	defer producer.Close()
-
-	for i := 0; i < 5; i++ {
-		str := fmt.Sprint("hello kirill apanasiuk")
-		msg := &sarama.ProducerMessage{
-			Topic:     kafkaConfig.CONST_TOPIC,
-			Partition: -1,
-			Value:     sarama.StringEncoder(str),
-		}
-		partition, offset, err := producer.SendMessage(msg)
-		if err != nil {
-			log.Println("SendMessage err: ", err)
-			return
-		}
-		log.Printf("[producer] partition id: %d; offset:%d, value: %s\n", partition, offset, str)
+		log.Fatal(err)
 	}
 
-	return
-	receiver := NewDataReceiver()
 	http.HandleFunc("/ws", receiver.handleWS)
 	err = http.ListenAndServe(":3000", nil)
 	if err != nil {
@@ -52,12 +32,46 @@ func main() {
 type DataReceiver struct {
 	msgChannel chan types.OBUData
 	conn       *websocket.Conn
+	prod       *sarama.SyncProducer
 }
 
-func NewDataReceiver() *DataReceiver {
+func NewDataReceiver() (*DataReceiver, error) {
+	config := sarama.NewConfig()
+	config.Producer.Return.Successes = true
+	config.Producer.Return.Errors = true
+	producer, err := sarama.NewSyncProducer([]string{kafkaConfig.CONST_HOST}, config)
+	if err != nil {
+		fmt.Println("error when building producer")
+		return nil, err
+	}
+
+	fmt.Println("Producer successfully builded")
+
 	return &DataReceiver{
 		msgChannel: make(chan types.OBUData, 128),
+		prod:       &producer,
+	}, nil
+}
+
+func (dr *DataReceiver) produceData(topic string, data types.OBUData) error {
+	b, err := json.Marshal(data)
+	if err != nil {
+		return err
 	}
+	msg := &sarama.ProducerMessage{
+		Topic:     topic,
+		Partition: -1,
+		Value:     sarama.StringEncoder(b),
+	}
+	producer := *dr.prod
+	partition, offset, err := producer.SendMessage(msg)
+	if err != nil {
+		log.Println("SendMessage err: ", err)
+		return err
+	}
+
+	fmt.Printf("Message is stored in topic(%s)/partition(%d)/offset(%d)\n", topic, partition, offset)
+	return nil
 }
 
 func (dr *DataReceiver) handleWS(w http.ResponseWriter, r *http.Request) {
@@ -81,7 +95,9 @@ func (dr *DataReceiver) wsReceiveLoop() {
 			log.Println("read error:", err)
 			continue
 		}
-		fmt.Printf("recieved OBU data from [%d] :: <lat %2.f, long %2f>\n", data.OBUID, data.Lat, data.Long)
-		//dr.msgChannel <- data
+		fmt.Println("received message", data)
+		if err := dr.produceData(kafkaConfig.CONST_TOPIC, data); err != nil {
+			fmt.Println("kafka produce error:", err)
+		}
 	}
 }

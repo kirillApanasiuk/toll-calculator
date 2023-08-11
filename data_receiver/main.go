@@ -1,12 +1,10 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"github.com/gorilla/websocket"
 	kafkaConfig "github.com/kirillApanasiuk/toll-calculator/config"
 	"github.com/kirillApanasiuk/toll-calculator/types"
-	"gopkg.in/IBM/sarama.v1"
 	"log"
 	"net/http"
 )
@@ -32,49 +30,30 @@ func main() {
 type DataReceiver struct {
 	msgChannel chan types.OBUData
 	conn       *websocket.Conn
-	prod       *sarama.SyncProducer
+	prod       DataProducer
 }
 
 func NewDataReceiver() (*DataReceiver, error) {
-	config := sarama.NewConfig()
-	config.Producer.Return.Successes = true
-	config.Producer.Return.Errors = true
-	producer, err := sarama.NewSyncProducer([]string{kafkaConfig.CONST_HOST}, config)
+	var (
+		p   DataProducer
+		err error
+	)
+	p, err = NewKafkaSaramaProducer()
 	if err != nil {
-		fmt.Println("error when building producer")
-		return nil, err
+		log.Fatalf("The kafka sarama producer can't be setup -> %v \n", err)
 	}
 
+	p = NewLogMiddleware(p)
 	fmt.Println("Producer successfully builded")
 
 	return &DataReceiver{
 		msgChannel: make(chan types.OBUData, 128),
-		prod:       &producer,
+		prod:       p,
 	}, nil
 }
 
-func (dr *DataReceiver) produceData(topic string, data types.OBUData) error {
-	b, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-	msg := &sarama.ProducerMessage{
-		Topic:     topic,
-		Partition: -1,
-		Value:     sarama.StringEncoder(b),
-	}
-	producer := *dr.prod
-	partition, offset, err := producer.SendMessage(msg)
-	if err != nil {
-		log.Println("SendMessage err: ", err)
-		return err
-	}
-
-	fmt.Printf("Message is stored in topic(%s)/partition(%d)/offset(%d)\n", topic, partition, offset)
-	return nil
-}
-
 func (dr *DataReceiver) handleWS(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("something happens here")
 	u := websocket.Upgrader{
 		ReadBufferSize:  1028,
 		WriteBufferSize: 1028,
@@ -96,7 +75,7 @@ func (dr *DataReceiver) wsReceiveLoop() {
 			continue
 		}
 		fmt.Println("received message", data)
-		if err := dr.produceData(kafkaConfig.CONST_TOPIC, data); err != nil {
+		if err := dr.prod.ProduceData(kafkaConfig.CONST_TOPIC, data); err != nil {
 			fmt.Println("kafka produce error:", err)
 		}
 	}

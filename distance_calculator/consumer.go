@@ -2,41 +2,44 @@ package main
 
 import (
 	config2 "github.com/kirillApanasiuk/toll-calculator/config"
+	"github.com/sirupsen/logrus"
 	"gopkg.in/IBM/sarama.v1"
-	"log"
 )
 
+// This can also be called KafkaTransport
 type KafkaSaramaConsumer struct {
-	consumer *sarama.Consumer
+	consumer    *sarama.Consumer
+	calcService CalculatorServicer
 }
 
-func NewKafkaConsumer() (*KafkaSaramaConsumer, error) {
+func NewKafkaConsumer(host string, calcService CalculatorServicer) (*KafkaSaramaConsumer, error) {
 	config := sarama.NewConfig()
 	config.Consumer.Offsets.Initial = sarama.OffsetNewest
 	config.Consumer.Offsets.Retry.Max = 3
 	config.Consumer.Return.Errors = true
 
-	consumer, err := sarama.NewConsumer([]string{config2.CONST_HOST}, config)
+	consumer, err := sarama.NewConsumer([]string{host}, config)
 	if err != nil {
-		log.Fatal("Error while configuring consumer")
+		logrus.Errorf("Error while configuring consumer")
 		return nil, err
 	}
 
-	log.Println("start consuming")
+	logrus.Info("start consuming ...")
 
 	return &KafkaSaramaConsumer{
-		consumer: &consumer,
+		consumer:    &consumer,
+		calcService: calcService,
 	}, nil
 }
 
-func (s *KafkaSaramaConsumer) Subscribe(
+func (s *KafkaSaramaConsumer) SubscribeLoop(
 	topic string, errorChan chan *sarama.ConsumerError,
 	messageChan chan *sarama.ConsumerMessage,
 ) {
 	consumer := *s.consumer
 	partitionList, err := consumer.Partitions(topic)
 	if err != nil {
-		log.Printf("Error while getting partitions \n %v", err)
+		logrus.Printf("Error while getting partitions \n %v", err)
 	}
 
 	for _, partition := range partitionList {
@@ -44,7 +47,7 @@ func (s *KafkaSaramaConsumer) Subscribe(
 
 		go func() {
 			if err != nil {
-				log.Printf("couldn't create partition consumer, err :%s", err.Error())
+				logrus.Printf("couldn't create partition consumer, err :%s", err.Error())
 			}
 
 			for {

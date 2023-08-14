@@ -10,10 +10,13 @@ func main() {
 	var (
 		errorChan    = make(chan *sarama.ConsumerError)
 		messageChan  = make(chan *sarama.ConsumerMessage)
-		calcServicer = NewCalculatorService()
-		consumer, _  = NewKafkaConsumer(config.CONST_HOST, calcServicer)
+		calcServicer CalculatorServicer
 	)
+	calcServicer = NewCalculatorService()
+	//wrap calc service with log middleware
+	calcServicer = NewLogMiddleware(calcServicer)
 
+	consumer, _ := NewKafkaConsumer(config.CONST_HOST, calcServicer)
 	consumer.SubscribeLoop(config.CONST_TOPIC, errorChan, messageChan)
 	go makeSomethingWithSubscribedData(errorChan, messageChan, calcServicer)
 
@@ -30,15 +33,8 @@ func makeSomethingWithSubscribedData(
 		case err := <-errorChan:
 			logrus.Errorf("err %s", err.Error())
 		case msg := <-messsageChan:
-
-			logrus.Infof("recieved message %v", string(msg.Value))
-
-			res, err := calcService.CalculateDistance(msg.Value)
-			if err != nil {
-				logrus.Errorf("Custom message %v \n", err)
-			}
-
-			logrus.Printf("Youhooo my data %f.2", res)
+			res, _ := calcService.CalculateDistance(msg.Value)
+			_ = res
 		}
 	}
 }

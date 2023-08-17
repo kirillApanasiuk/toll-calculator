@@ -1,0 +1,7 @@
+syntax="proto3";
+
+option go_package = "github.com/kirillApanasiuk/toll-calculator/types";
+
+message Test{
+  int32 someint = 1;
+}

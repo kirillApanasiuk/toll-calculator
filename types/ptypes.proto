@@ -2,6 +2,14 @@ syntax="proto3";
 
 option go_package = "github.com/kirillApanasiuk/toll-calculator/types";
 
-message Test{
-  int32 someint = 1;
+service Aggregator{
+  rpc Aggregate(AggregateRequest) returns (None);
+}
+
+message None{}
+
+message AggregateRequest{
+  int32  ObuId = 1;
+  double Value = 2;
+  int64 Unix  = 3;
 }
